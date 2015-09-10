@@ -1,0 +1,12 @@
+extends layout
+
+block content
+ h1= title
+ p Welcome to #{title}
+ form(name="setupsprint", action="/setupsprint", method="post")
+  select(id=project, name="key")
+   each project, i in projects
+    option(value=project.key) Project #{project.key}
+  input(id=sprint, name="sprint", value="Sprint 1")
+  input(type="submit", value="Setup Sprint")  
+ 

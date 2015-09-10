@@ -1,0 +1,15 @@
+{
+  "name": "JiraBoard",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+	"jira":"0.9",
+    "express": "3.2.6",
+    "jade": "*",
+    "http-delayed-response":"*",
+    "promise":"*"
+  }
+}
