@@ -5,12 +5,11 @@
 
 
 var express = require('express')
-  , config = require('./config')
   , routes = require('./routes')
   , http = require('http')
   , path = require('path');
-var app = express();
-
+app = express();
+config = require('./config');
 // all environments
 app.set('port', process.env.PORT || 3000);
 app.set('views', __dirname + '/views');
@@ -22,17 +21,24 @@ app.use(express.methodOverride());
 app.use(app.router);
 app.use(express.static(path.join(__dirname, 'public')));
 
-var JiraApi = require('jira').JiraApi;
-jira = new JiraApi('http', config.host, config.port, config.user, config.password, '2',true,false);
-
-
 // development only
 if ('development' == app.get('env')) {
 	app.use(express.errorHandler());
 }
 
 
-app.get('/', routes.index);
+app.get('/home', routes.index);
+
+app.get('/',  function (req, res) {
+  res.render('login');
+});
+
+
+app.post('/login', routes.login);
+
+app.get('/sprint',  function (req, res) {
+	  res.render('sprint');
+});
 
 app.post('/setupsprint', routes.setup);
 

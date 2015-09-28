@@ -1,0 +1,16 @@
+extends layout
+
+block content
+ h1="Login to Jira"
+ p
+ h3 #{error}
+ p 
+ form(name="login", action="/login", method="post")
+  input(id=url, name="url", value="mamigo.atlassian.net")
+  p
+  input(id=user, name="user", value="akhil.kumar")
+  p
+  input(type="password", id=password, name="password", value="")
+  p
+  input(type="submit", value="Login")  
+ 
