@@ -27,8 +27,6 @@ if ('development' == app.get('env')) {
 }
 
 
-app.get('/home', routes.index);
-
 app.get('/',  function (req, res) {
   res.render('login');
 });
@@ -41,6 +39,12 @@ app.get('/sprint',  function (req, res) {
 });
 
 app.post('/setupsprint', routes.setup);
+
+app.get('/versions', function (req, res) {
+	  res.render('version');
+});
+
+app.post('/analyzeversions',  routes.analyzeversions);
 
 http.createServer(app).listen(app.get('port'), function(){
   console.log('Express server listening on port ' + app.get('port'));

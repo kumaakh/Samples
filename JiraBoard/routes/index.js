@@ -5,7 +5,7 @@ var Promise = require('promise');
 var JiraApi = require('jira').JiraApi;
 
 exports.index = function(req, res) {
-	app.locals.jira.listProjects(function(e, response) {
+	jira.listProjects(function(e, response) {
 		if (response != null) {
 			res.render('index', {
 				"title" : "JiraBoard",
@@ -19,6 +19,193 @@ exports.index = function(req, res) {
 		}
 	});
 };
+
+
+
+/**
+ * login 
+ */
+
+exports.login = function(req, res) {
+	jira = new JiraApi(config.proto, req.body.url, config.port, req.body.user, req.body.password, '2',true,config.strictSSL,false,config.isLocal);
+	jira.listProjects(function(e, response) {
+		if (response != null) {
+			console.log(response);
+			console.log("Logged in to Jira!");
+			app.locals.jira=jira;
+			app.locals.projects=response; //lets remember the projects
+			res.render('index', {
+				"title" : "JiraBoard",
+			});
+			
+		} else {
+			console.log("Failed login "+e);
+			delete app.locals.jira;
+			delete app.locals.projects;
+			res.render('login', {
+				"title" : "JiraBoard",
+				"error" : "error Logging in. Please try again..."
+			});
+		}
+	});
+};
+
+/**
+ * Sprint setup
+ */
+exports.setup = function(req, res) {
+	var key = req.body.key;
+	var sprint = req.body.sprint.replace(/ +/g, "");
+	var label = key + "-" + sprint;
+	res.write('<html><head>');
+	res.write('<body>');
+	res.write('<H2>' + label + '</H2>');
+	var delayed = new DelayedResponse(req, res);
+	var end= delayed.wait();
+	//make a list of filters
+	//p.push(makeFiltersGlobal(req,res));
+	var f=[];
+		
+	//
+	f.push({
+		"name" : key + "-Backlog",
+		"description" : "Backlog for " + key + " project",
+		"jql" : "project = "
+				+ key
+				+ " AND issuetype not in (Epic) AND status in (Open, Reopened) AND (labels is EMPTY OR labels not in ("
+				+ label + ")) ORDER BY priority DESC",
+		"favourite" : true
+	});
+	
+	f.push({
+		"name" : key + "-ToDo",
+		"description" : "ToDo for " + label,
+		"jql" : "project = "
+				+ key
+				+ " AND issuetype not in (Epic) AND status in (Open, Reopened) AND labels in ("
+				+ label + ") ORDER BY priority DESC",
+		"favourite" : true
+	});
+
+	f.push({
+			"name" : key + "-WIP",
+			"description" : "WIP for " + label,
+			"jql" : "project = "
+					+ key
+					+ " AND issuetype not in (Epic) AND status in (\"In Progress\") AND labels in ("
+					+ label + ") ORDER BY priority DESC",
+			"favourite" : true
+	});
+	
+	f.push({
+			"name" : key + "-Developed",
+			"description" : "Developed in " + label,
+			"jql" : "project = "
+					+ key
+					+ " AND issuetype not in (Epic) AND status in (Resolved) AND labels in ("
+					+ label + ") ORDER BY priority DESC",
+			"favourite" : true
+	});
+	
+	f.push({
+		"name" : key + "-Done",
+		"description" : "QA Complete in " + label,
+		"jql" : "project = "
+				+ key
+				+ " AND issuetype not in (Epic) AND status in (Closed) AND labels in ("
+				+ label + ") ORDER BY priority DESC",
+		"favourite" : true
+	});
+	
+	var ps=[];
+	jira.findFilters(f,function(err,result){
+			if(result==null){
+				writeLine(res,"error finding filters");
+				end(null,'</body></html>');
+				return;
+			}
+			jira.changeFilterShareScope(true,function(err,resp){
+				if(err!=null) {
+					writeLine("can not make filter scope global! please do it manually");
+				}
+				var p = null;
+				for(var k=0;k<f.length;k++){
+					ps.push(createFilterEx(f[k],req,res));
+				}
+				console.log("resolved findfilter");
+				end(Promise.all(ps).then(function(){ console.log("ending now"); return '</body></html>';}));
+			});
+		});
+};
+
+
+exports.analyzeversions = function(req, res) {
+	var key = req.body.key;
+	res.write('<html><head>');
+	res.write('<body>');
+	res.write('<H2> Analyzing' + key + '</H2>');
+	var delayed = new DelayedResponse(req, res);
+	var end= delayed.wait();
+	jira.getVersions(key,function(error,versions){
+		//debugger;
+		if(error!=null) {
+			writeLine(res, "Can not fetch versions "+error);
+			end(null,'</body></html>');
+			return;
+		}
+		if(versions.length==0){
+			writeLine(res, "No versions");
+			end(null,'</body></html>');
+			return;
+		}
+		writeLine(res, "Found "+versions.length+" versions");
+		var data={
+				"array":versions,
+				"index":0,
+				"res":res,
+				"end":end,
+				"released":[],
+				"markForDel":[]
+		};
+		recurse(data);
+		
+		
+	});
+};
+
+function recurse(data)
+{
+	if(data.index<data.array.length){
+		var item=data.array[data.index++];
+		jira.getVersion(item.id,function(error,details){
+			if(details)
+			{
+				var a=item.issuesUnresolvedCount=details.issuesUnresolvedCount;
+				var b=item.issuesFixedCount=details.issuesFixedCount;
+				var c=item.issuesAffectedCount=details.issuesAffectedCount;
+				if(item.released){
+					data.released.push(item.id);
+					writeLine(data.res,"Released: "+item.name);
+				}
+				else{
+					if(a+b+c==0){
+						writeLine(data.res,"deleting : "+item.name);
+						data.markForDel.push(item.id);
+						jira.deleteVersion(item.id);
+					}
+				}
+			}
+			recurse(data);
+		});
+	}
+	else{
+		writeLine(data.res,"Released: "+data.released.length);
+		writeLine(data.res,"to be deleted: "+data.markForDel.length);
+		data.end(null,'</body></html>');
+	}
+}
+
+//private functions
 
 function writeLine(res, line) {
 	console.log(line);
@@ -124,7 +311,7 @@ function createFilterEx(filterParams, req, res) {
 	});
 }
 
-
+/*
 exports.setup1 = function(req, res) {
 	var key = req.body.key;
 	var sprint = req.body.sprint.replace(/ +/g, "");
@@ -188,119 +375,7 @@ exports.setup1 = function(req, res) {
 	
 	delayed.end(Promise.all(p).then(function(){return '</body></html>';}));
 };
-
-
-exports.setup = function(req, res) {
-	var key = req.body.key;
-	var sprint = req.body.sprint.replace(/ +/g, "");
-	var label = key + "-" + sprint;
-	res.write('<html><head>');
-	res.write('<body>');
-	res.write('<H2>' + label + '</H2>');
-	var delayed = new DelayedResponse(req, res);
-	var end= delayed.wait();
-	//make a list of filters
-	//p.push(makeFiltersGlobal(req,res));
-	var f=[];
-		
-	//
-	f.push({
-		"name" : key + "-Backlog",
-		"description" : "Backlog for " + key + " project",
-		"jql" : "project = "
-				+ key
-				+ " AND issuetype not in (Epic) AND status in (Open, Reopened) AND (labels is EMPTY OR labels not in ("
-				+ label + ")) ORDER BY priority DESC",
-		"favourite" : true
-	});
-	
-	f.push({
-		"name" : key + "-ToDo",
-		"description" : "ToDo for " + label,
-		"jql" : "project = "
-				+ key
-				+ " AND issuetype not in (Epic) AND status in (Open, Reopened) AND labels in ("
-				+ label + ") ORDER BY priority DESC",
-		"favourite" : true
-	});
-
-	f.push({
-			"name" : key + "-WIP",
-			"description" : "WIP for " + label,
-			"jql" : "project = "
-					+ key
-					+ " AND issuetype not in (Epic) AND status in (\"In Progress\") AND labels in ("
-					+ label + ") ORDER BY priority DESC",
-			"favourite" : true
-	});
-	
-	f.push({
-			"name" : key + "-Developed",
-			"description" : "Developed in " + label,
-			"jql" : "project = "
-					+ key
-					+ " AND issuetype not in (Epic) AND status in (Resolved) AND labels in ("
-					+ label + ") ORDER BY priority DESC",
-			"favourite" : true
-	});
-	
-	f.push({
-		"name" : key + "-Done",
-		"description" : "QA Complete in " + label,
-		"jql" : "project = "
-				+ key
-				+ " AND issuetype not in (Epic) AND status in (Closed) AND labels in ("
-				+ label + ") ORDER BY priority DESC",
-		"favourite" : true
-	});
-	
-	var ps=[];
-	jira.findFilters(f,function(err,result){
-			if(result==null){
-				writeLine(res,"error finding filters");
-				end(null,'</body></html>');
-				return;
-			}
-			jira.changeFilterShareScope(true,function(err,resp){
-				if(err!=null) {
-					writeLine("can not make filter scope global! please do it manually");
-				}
-				var p = null;
-				for(var k=0;k<f.length;k++){
-					ps.push(createFilterEx(f[k],req,res));
-				}
-				console.log("resolved findfilter");
-				end(Promise.all(ps).then(function(){ console.log("ending now"); return '</body></html>';}));
-			});
-		});
-};
+*/
 
 
 
-/**
- * login 
- */
-
-exports.login = function(req, res) {
-	jira = new JiraApi(config.proto, req.body.url, config.port, req.body.user, req.body.password, '2',true,config.strictSSL,false,config.isLocal);
-	jira.listProjects(function(e, response) {
-		if (response != null) {
-			//console.log(response);
-			console.log("Logged in to Jira!");
-			app.locals.jira=jira;
-			app.locals.projects=response; //lets remember the projects
-			res.render('index', {
-				"title" : "JiraBoard",
-			});
-			
-		} else {
-			console.log("Failed login "+e);
-			delete app.locals.jira;
-			delete app.locals.projects;
-			res.render('login', {
-				"title" : "JiraBoard",
-				"error" : "error Logging in. Please try again..."
-			});
-		}
-	});
-};

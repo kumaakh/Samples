@@ -1,0 +1,10 @@
+extends layout
+
+block content
+ h1= title
+ p Welcome to #{title}
+ form(name="versions", action="/analyzeversions", method="post")
+  select(id=project, name="key")
+   each project, i in projects
+    option(value=project.key) Project #{project.key}
+  input(type="submit", value="Analyze")
